@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-import urllib, urllib2, re, sys, json
+import urllib, urllib2, re, sys, json, requests
 import xbmcplugin, xbmcgui
 
 def getHTML(url, data = False):
@@ -12,6 +12,22 @@ def getHTML(url, data = False):
     
     html = conn.read()
     conn.close()
+    
+    return html
+    
+def postHTML(url, post_fields):
+    r = requests.post(url, data=post_fields)
+    print(r.status_code, r.reason)
+    html = r.text.encode('windows-1251')
+    
+    #Let's just itterate through stupid encoding/decodings
+    # try:
+        # html = html.decode('utf-8').encode('utf-8')
+    # except:
+        # html = html.decode('latin-1').encode('utf-8')
+        
+    # test = html.encode('latin1').decode('utf8')
+    # print test
     
     return html
 
@@ -26,28 +42,34 @@ def showkeyboard(txtMessage="",txtHeader="",passwordField=False):
 
 def Search():
     text = showkeyboard('', 'Поиск по названию')
-    url = 'http://kino-dom.org/index.php?do=search'
-    data =  {'do' : 'search', 'subaction': 'search', 'search_start': '1', 'full_search': '0',
-    'result_from': '1', 'expand': '1', 'story': text.decode('utf-8').encode('windows-1251')}
-    html = getHTML(url, data)
-    RenderMovies('http://kino-dom.org', html)
+    url = 'http://kino-dom.org/'
+    # data =  {'query' : text}
+    data = {'do': 'search', 'subaction': 'search', 'story': text}
+    html = postHTML(url, data)
+    # genre_links = re.compile('href="(http\:\/\/kino-dom\.tv\/[^\/]+\/[^\.]+\.html)"><span\sclass="searchheading">[<b>]*([^<]+)<').findall(html.decode('windows-1251').encode('utf-8'))
+    # for link, title in genre_links:
+        # addDir(title, link, 25, None)
+    genre_links = re.compile('<div class="post info">\s*<a href="(.+?)" >').findall(html.decode('windows-1251').encode('utf-8'))
+    genre_names = re.compile('<div class="post-title">(.+?)</div>').findall(html.decode('windows-1251').encode('utf-8'))
+    genre_pict = re.compile('<div style="background-image:url\((.+?)\)" class="post-image">').findall(html.decode('windows-1251').encode('utf-8'))
+    print "HTML",html.decode('windows-1251').encode('utf-8')
+    print "genre_links", genre_links, genre_names, genre_pict
 
-    #addDir('Искать дальше >>>', 'http://kino-dom.org/index.php?page=2&story='+text, 45, None)
-    addNextSearch('Искать дальше >>>', 45, text, 2)
+    next_link = re.compile('<li class="nav next"><a href="(.+?)">').findall(html.decode('windows-1251').encode('utf-8'))
 
-def SearchNext(page, text):
-    url = 'http://kino-dom.org/index.php?do=search'
-    data =  {'do' : 'search', 'subaction': 'search', 'search_start': page, 'full_search': '0',
-    'result_from': '1', 'expand': '1', 'story': text.decode('utf-8').encode('windows-1251')}
-    html = getHTML(url, data)
-    RenderMovies('http://kino-dom.org', html)
+    # addDir("<< На главную", url, None, None)
 
-    addNextSearch('Искать дальше >>>', 45, text, page+1)
+    for i in range(0,len(genre_links)):
+        addDir(genre_names[i], genre_links[i], 25, genre_pict[i])
+
+    if len(next_link) > 0:
+        addDir("Следующая страница >>", next_link[0], 20, None)
+
+
 
 def isLinkUseful(needle):
     haystack = ['/?do=archive', 'http://www.linecinema.org/', 'http://www.animult.tv/', 
-    '/faq.html', '/agreement.html', '/copyright.html', '/reklama.html', '/contacts.html', '/news-kino-serials/',
-    '/online-tv/', '/people-tv/', '/sport-tv/', '/fun-tv/']
+    '/faq.html', '/agreement.html', '/copyright.html', '/reklama.html', '/contacts.html', '/news-kino-serials/']
     return needle not in haystack
 
 def Categories():
@@ -63,11 +85,11 @@ def Categories():
 
 def Movies(url):
     html = getHTML(url)
-    RenderMovies(url, html)
-
-def RenderMovies(url, html):
-    genre_links = re.compile('<div class="post info">\s*<a href="(.+?)"\s*>').findall(html.decode('windows-1251').encode('utf-8'))
-    genre_names = re.compile('<div class="post-title">(.+?)</div>').findall(html.decode('windows-1251').encode('utf-8'))
+    
+    print "HTML: ", html.decode('windows-1251').encode('utf-8')
+    
+    genre_links = re.compile('<div class="post info">\s*<a href="(.+?)">').findall(html.decode('windows-1251').encode('utf-8'))
+    genre_names = re.compile('<div class="post-title"><h3>(.+?)</h3></div>').findall(html.decode('windows-1251').encode('utf-8'))
     genre_pict = re.compile('<div style="background-image:url\((.+?)\)" class="post-image">').findall(html.decode('windows-1251').encode('utf-8'))
 
     next_link = re.compile('<li class="nav next"><a href="(.+?)">').findall(html.decode('windows-1251').encode('utf-8'))
@@ -96,19 +118,40 @@ def Videos(url, title):
 
     for series in data['playlist']:
         if 'playlist' in series and len(series['playlist']) > 0:
-            for sr in series['playlist']:
-                file = re.compile('(http\:\/\/[^\[]+)\[([\d,]+)\](\.\w{2,4})').findall(sr['file'])
-                file_q = re.compile('(\d+)').findall(file[0][1])
-
-                for qat in file_q:
-                    file_normalize = file[0][0] + qat + file[0][2]
-                    addLink(series['comment'] + ': '+ sr['comment'] + ' - q' + qat, file_normalize)
+            for sr in series['playlist']:                
+                #addLink(series['comment'] + ': '+ sr['comment'], file)
+                title = series['comment'] + ': '+ sr['comment']
+                addSysLink(title.encode('utf-8'), sr['file'], 40, None)
         else:
-            addLink(series['comment'], series['file'])
+            #addLink(series['comment'], series['file']),
+            title = series['comment']
+            addSysLink(series['comment'], series['file'], 40, None)
 
     #addLink(title, link)
 
+def PlayVideo(url, title):
+    print "URL: ", url
+    fileResStr = url.partition('[')[-1].rpartition(']')[0]
+    fileRes = fileResStr.split(',')
+    fileRes = [x for x in fileRes if x]
 
+    print "Resolutions: ", fileRes
+    
+    if len(fileRes) == 0:
+        xbmc.Player().play(url)
+    else:
+        # options = ['480p', '320p']
+        dialog = xbmcgui.Dialog()
+        selection = dialog.select("выбрать разрешение:",fileRes)
+        wid = xbmcgui.getCurrentWindowId()
+        print "SELECTION: ", selection, wid
+        
+        if selection == -1:
+            return False
+        elif selection >= 0:
+            file = url.replace('['+fileResStr+']', fileRes[selection])
+            xbmc.Player().play(file)
+    
 def get_params():
     param=[]
     paramstring=sys.argv[2]
@@ -131,8 +174,24 @@ def get_params():
 def addLink(title, url):
     item = xbmcgui.ListItem(title, iconImage='DefaultVideo.png', thumbnailImage='')
     item.setInfo( type='Video', infoLabels={'Title': title} )
-
+    
+    #options = ['480p', '320p']
+    #dia2 = xbmcgui.Dialog()
+    #seleccion2 = dia2.select("выбрать разрешение:",options)
+    
     xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=url, listitem=item)
+    
+def addSysLink(title, url, mode, picture):
+    if picture == None:
+        item = xbmcgui.ListItem(title, iconImage='DefaultFolder.png', thumbnailImage='')
+    else:
+        item = xbmcgui.ListItem(title, iconImage='DefaultFolder.png', thumbnailImage=picture)
+
+    sys_url = sys.argv[0] + '?title=' + urllib.quote_plus(title) + '&url=' + urllib.quote_plus(url) + '&mode=' + urllib.quote_plus(str(mode))
+    
+    item.setInfo( type='Video', infoLabels={'Title': title} )
+
+    xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=sys_url, listitem=item)
 
 
 def addDir(title, url, mode, picture):
@@ -146,13 +205,6 @@ def addDir(title, url, mode, picture):
     
     item.setInfo( type='Video', infoLabels={'Title': title} )
 
-    xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=sys_url, listitem=item, isFolder=True)
-
-
-def addNextSearch(title, mode, query, page):
-    item = xbmcgui.ListItem(title, iconImage='DefaultFolder.png', thumbnailImage='')
-    sys_url = sys.argv[0] + '?title=' + urllib.quote_plus(title) + '&query=' + urllib.quote_plus(query) + '&mode=' + urllib.quote_plus(str(mode)) + '&page=' + urllib.quote_plus(str(page))
-    item.setInfo( type='Video', infoLabels={'Title': title} )
     xbmcplugin.addDirectoryItem(handle=int(sys.argv[1]), url=sys_url, listitem=item, isFolder=True)
 
 
@@ -170,12 +222,6 @@ except: pass
 try:    mode = int(params['mode'])
 except: pass
 
-try:    page = int(params['page'])
-except: pass
-
-try:    query = urllib.unquote_plus(params['query'])
-except: pass
-
 if mode == None:
     Categories()
 
@@ -190,8 +236,8 @@ elif mode == 30:
 
 elif mode == 35:
     Search()
-
-elif mode == 45:
-    SearchNext(page, query)
+    
+elif mode == 40:
+    PlayVideo(url, title)
 
 xbmcplugin.endOfDirectory(int(sys.argv[1]))
